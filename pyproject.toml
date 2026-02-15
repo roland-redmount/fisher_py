@@ -24,3 +24,8 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/ethz-institute-of-microbiology/fisher_py"
 Issues = "https://github.com/ethz-institute-of-microbiology/fisher_py/issues"
+
+[dependency-groups]
+dev = [
+    "requests>=2.32.5",
+]
