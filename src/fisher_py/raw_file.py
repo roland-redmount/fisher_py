@@ -53,14 +53,23 @@ class RawFile(object):
         """
         Available masses for MS2 filtering (precursor masses)
         """
+        self._ensure_scan_cache()
         return self._ms2_filter_unique_filter_masses
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, cache_scans: bool = True):
         self._path = path
         self._raw_file_access = RawFileReaderAdapter.file_factory(path)
         self._raw_file_access.select_instrument(Device.MS, 1)
         self._spectrum_cache = dict()
         self._result_string_cache = dict()
+        self._scan_cache_loaded = False
+
+        if cache_scans:
+            self._ensure_scan_cache()
+
+    def _ensure_scan_cache(self):
+        if self._scan_cache_loaded:
+            return
 
         first_scan = self.first_scan
         num_scans = self.number_of_scans
@@ -108,6 +117,7 @@ class RawFile(object):
         self._ms2_filter_scan_numbers = np.array(ms2_filter_scan_numbers)
         self._ms2_filter_masses = np.array(ms2_filter_masses)
         self._ms2_filter_unique_filter_masses = np.array(sorted(set(ms2_filter_masses))) if ms2_filter_masses else np.array([])
+        self._scan_cache_loaded = True
 
     def _get_scan_filter_precursor_mass_(self, scan_number: int) -> float:
         scan_event = self._raw_file_access.get_scan_event_for_scan_number(scan_number)
@@ -268,7 +278,8 @@ class RawFile(object):
         """
         if scan_number < self.first_scan or scan_number > self.last_scan:
             raise ValueError(f'The scan number {scan_number} is out of bounds. Valid range {self.first_scan} - {self.last_scan}.')
-        
+
+        self._ensure_scan_cache()
         idx = np.argmin(np.abs(self._scan_numbers - scan_number))
         return self._retention_times[idx]
 
@@ -283,6 +294,7 @@ class RawFile(object):
         if rt < 0 or rt > self.total_time_min:
             raise ValueError(f'The retiontion time {rt} is out of bounds. Valid range 0 - {self.total_time_min}.')
 
+        self._ensure_scan_cache()
         idx = np.argmin(np.abs(self._retention_times - rt))
         return int(self._scan_numbers[idx])
 
@@ -297,6 +309,7 @@ class RawFile(object):
         if rt < 0 or rt > self.total_time_min:
             raise ValueError(f'The retiontion time {rt} is out of bounds. Valid range 0 - {self.total_time_min}.')
 
+        self._ensure_scan_cache()
         idx = np.argmin(np.abs(self._ms1_retention_times - rt))
         found_rt = self._ms1_retention_times[idx]
         found_scan_nr = self._ms1_scan_numbers[idx]
@@ -316,6 +329,7 @@ class RawFile(object):
         if rt < 0 or rt > self.total_time_min:
             raise ValueError(f'The retiontion time {rt} is out of bounds. Valid range 0 - {self.total_time_min}.')
 
+        self._ensure_scan_cache()
         if precursor_mz is None:
             idx = np.argmin(np.abs(self._ms2_retention_times - rt))
             found_rt = self._ms2_retention_times[idx]
