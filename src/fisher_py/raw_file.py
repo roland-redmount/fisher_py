@@ -59,77 +59,55 @@ class RawFile(object):
         self._path = path
         self._raw_file_access = RawFileReaderAdapter.file_factory(path)
         self._raw_file_access.select_instrument(Device.MS, 1)
-
-        # fetch retention times and scan numbers
-        scan_numbers, rt = self._get_scan_numbers_and_retention_times_()
-        self._scan_numbers = scan_numbers
-        self._retention_times = rt
         self._spectrum_cache = dict()
         self._result_string_cache = dict()
 
-        # fetch retention times and scan numbers for MS1 only
-        scan_numbers, rt = self._get_ms_scan_numbers_and_retention_times_(MsOrderType.Ms)
-        self._ms1_scan_numbers = scan_numbers
-        self._ms1_retention_times = rt
-
-        # fetch retention times and scan numbers for MS2 only
-        scan_numbers, rt = self._get_ms_scan_numbers_and_retention_times_(MsOrderType.Ms2)
-        self._ms2_scan_numbers = scan_numbers
-        self._ms2_retention_times = rt
-
-        # fetch filters for MS2
-        scan_numbers, filter_masses = self._get_ms2_scan_numbers_and_masses_()
-        self._ms2_filter_scan_numbers = scan_numbers
-        self._ms2_filter_masses = filter_masses
-        self._ms2_filter_unique_filter_masses = np.array(sorted(list(set(self._ms2_filter_masses))))
-
-    def _get_scan_numbers_and_retention_times_(self) -> Tuple[List[int], List[float]]:
         first_scan = self.first_scan
-        scan_numbers = list()
-        retention_times = list()
+        num_scans = self.number_of_scans
 
-        for i in range(self.number_of_scans):
-            scan_number = i + first_scan
-            rt = self._raw_file_access.retention_time_from_scan_number(scan_number)
-            scan_numbers.append(scan_number)
-            retention_times.append(rt)
+        # fetch all retention times in one pass
+        scan_numbers = []
+        retention_times = []
+        for i in range(num_scans):
+            sn = i + first_scan
+            scan_numbers.append(sn)
+            retention_times.append(self._raw_file_access.retention_time_from_scan_number(sn))
+        self._scan_numbers = np.array(scan_numbers)
+        self._retention_times = np.array(retention_times)
 
-        return np.array(scan_numbers), np.array(retention_times)
+        # fetch scan events once and classify all scans in a single pass
+        scan_events = self._raw_file_access.get_scan_events(first_scan, self.last_scan)
 
-    def _get_ms2_scan_numbers_and_masses_(self) -> Tuple[List[float], List[float]]:
-        first_scan = self.first_scan
-        scan_numbers = list()
-        filter_mass_values = list()
-        scan_events = self._raw_file_access.get_scan_events(self.first_scan, self.last_scan)
+        ms1_scan_numbers = []
+        ms1_retention_times = []
+        ms2_scan_numbers = []
+        ms2_retention_times = []
+        ms2_filter_scan_numbers = []
+        ms2_filter_masses = []
 
         for i, scan_event in enumerate(scan_events):
-            if scan_event.ms_order != MsOrderType.Ms2:
-                continue
-            scan_number = i + first_scan
-            precursor_mass = self._get_scan_filter_precursor_mass_(scan_number)
-            if precursor_mass is None:
-                continue
+            sn = i + first_scan
+            ms_order = scan_event.ms_order
+            if ms_order == MsOrderType.Ms:
+                ms1_scan_numbers.append(sn)
+                ms1_retention_times.append(retention_times[i])
+            elif ms_order == MsOrderType.Ms2:
+                ms2_scan_numbers.append(sn)
+                ms2_retention_times.append(retention_times[i])
+                try:
+                    precursor_mass = scan_event.get_reaction(0).precursor_mass
+                    ms2_filter_scan_numbers.append(sn)
+                    ms2_filter_masses.append(precursor_mass)
+                except Exception:
+                    pass
 
-            scan_numbers.append(scan_number)
-            filter_mass_values.append(precursor_mass)
-
-        return np.array(scan_numbers), np.array(filter_mass_values)
-
-
-    def _get_ms_scan_numbers_and_retention_times_(self, ms_order: MsOrderType) -> Tuple[List[int], List[float]]:
-        first_scan = self.first_scan
-        scan_numbers = list()
-        retention_times = list()
-        scan_events = self._raw_file_access.get_scan_events(self.first_scan, self.last_scan)
-        
-        for i, scan_event in enumerate(scan_events):
-            if scan_event.ms_order != ms_order:
-                continue
-            scan_number = i + first_scan
-            scan_numbers.append(scan_number)
-            retention_times.append(self._raw_file_access.retention_time_from_scan_number(scan_number))
-
-        return np.array(scan_numbers), np.array(retention_times)
+        self._ms1_scan_numbers = np.array(ms1_scan_numbers)
+        self._ms1_retention_times = np.array(ms1_retention_times)
+        self._ms2_scan_numbers = np.array(ms2_scan_numbers)
+        self._ms2_retention_times = np.array(ms2_retention_times)
+        self._ms2_filter_scan_numbers = np.array(ms2_filter_scan_numbers)
+        self._ms2_filter_masses = np.array(ms2_filter_masses)
+        self._ms2_filter_unique_filter_masses = np.array(sorted(set(ms2_filter_masses))) if ms2_filter_masses else np.array([])
 
     def _get_scan_filter_precursor_mass_(self, scan_number: int) -> float:
         scan_event = self._raw_file_access.get_scan_event_for_scan_number(scan_number)
